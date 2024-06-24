@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <title>物流配送路徑最佳化</title>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <style>
+        #map {
+            height: 500px;
+            width: 100%;
+        }
+    </style>
+</head>
+<body>
+    <h1>物流配送路徑最佳化</h1>
+    <div id="map"></div>
+    <button id="tsp">TSP</button>
+    <button id="vrp">VRP</button>
+    <button id="addLocation">新增站點</button>
+    <button id="deleteLocation">刪除站點</button>
+
+    <script>
+        var locations = {{ locations | safe }};
+        var map;
+        var markers = [];
+        var routes = [];
+        var colors = ['#FF0000', '#00FF00', '#0000FF', '#FFFF00', '#FF00FF', '#00FFFF']; // 預定義顏色數組
+
+        function initMap() {
+            map = new google.maps.Map(document.getElementById('map'), {
+                center: {lat: 22.9999, lng: 120.2270},  // 台南市的經緯度
+                zoom: 13  // 設置適當的縮放級別
+            });
+
+            updateMarkers();
+        }
+
+        function updateMarkers() {
+            markers.forEach(function(marker) {
+                marker.setMap(null);
+            });
+            markers = [];
+
+            for (var i = 0; i < locations.length; i++) {
+                var marker = new google.maps.Marker({
+                    position: {lat: locations[i][0], lng: locations[i][1]},
+                    map: map,
+                    label: (i + 1).toString()
+                });
+                markers.push(marker);
+            }
+        }
+
+        function drawRoute(route, color) {
+            // 先將起點添加到路徑的末尾
+            route.push(route[0]);
+        
+            var path = new google.maps.Polyline({
+                path: route.map(function(idx) {
+                    return {lat: locations[idx][0], lng: locations[idx][1]};
+                }),
+                geodesic: true,
+                strokeColor: color,
+                strokeOpacity: 1.0,
+                strokeWeight: 2
+            });
+            path.setMap(map);
+            routes.push(path);
+        }
+
+        $(document).ready(function() {
+            $('#tsp').click(function() {
+                $.ajax({
+                    url: '/optimize',
+                    method: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify({method: 'tsp'}),
+                    success: function(response) {
+                        routes.forEach(function(route) {
+                            route.setMap(null);
+                        });
+                        routes = [];
+                        drawRoute(response.route, colors[0]);
+                    }
+                });
+            });
+
+            $('#vrp').click(function() {
+                var numVehicles = prompt('請輸入車輛數量:');
+                $.ajax({
+                    url: '/optimize',
+                    method: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify({method: 'vrp', num_vehicles: parseInt(numVehicles)}),
+                    success: function(response) {
+                        routes.forEach(function(route) {
+                            route.setMap(null);
+                        });
+                        routes = [];
+                        response.routes.forEach(function(route, index) {
+                            drawRoute(route, colors[index % colors.length]);
+                        });
+                    },
+                    error: function(err) {
+                        console.error('錯誤:', err);
+                        Swal.fire({
+                            icon: 'error',
+                            title: '錯誤',
+                            text: '優化VRP失敗: ' + err.responseJSON.error
+                        });
+                    }
+                });
+            });
+            
+
+            $('#addLocation').click(function() {
+                map.addListener('click', function(e) {
+                    addLocation(e.latLng.lat(), e.latLng.lng());
+                    google.maps.event.clearListeners(map, 'click'); // 清除點擊事件監聽
+                });
+            });
+
+            $('#deleteLocation').click(function() {
+                deleteLocation();
+            });
+        });
+
+        function addLocation(lat, lng) {
+            $.ajax({
+                url: '/add_location',
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({lat: lat, lng: lng}),
+                success: function(response) {
+                    locations = response.locations;
+                    updateMarkers();
+                    Swal.fire({
+                        icon: 'success',
+                        title: '成功',
+                        text: '站點已新增！'
+                    });
+                },
+                error: function(err) {
+                    console.error('錯誤:', err);
+                    Swal.fire({
+                        icon: 'error',
+                        title: '錯誤',
+                        text: '新增站點失敗: ' + err.responseJSON.error
+                    });
+                }
+            });
+        }
+
+        function deleteLocation() {
+            var index = prompt('請輸入要刪除的站點編號:');
+            if (index !== null) {
+                $.ajax({
+                    url: '/delete_location/' + index,
+                    method: 'DELETE',
+                    success: function(response) {
+                        locations = response.locations;
+                        updateMarkers();
+                        Swal.fire({
+                            icon: 'success',
+                            title: '成功',
+                            text: '站點已刪除！'
+                        });
+                    },
+                    error: function(err) {
+                        console.error('錯誤:', err);
+                        Swal.fire({
+                            icon: 'error',
+                            title: '錯誤',
+                            text: '刪除站點失敗: ' + err.responseJSON.error
+                        });
+                    }
+                });
+            }
+        }
+
+        function loadScript() {
+            var script = document.createElement('script');
+            script.src = "https://maps.googleapis.com/maps/api/js?key=AIzaSyAZfDI4XkqKJ0nZN0iLaOpWjxB-VLrE7lY&callback=initMap";
+            script.defer = true;
+            document.head.appendChild(script);
+        }
+
+        window.onload = loadScript;
+    </script>
+</body>
+</html>
